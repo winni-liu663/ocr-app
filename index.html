@@ -76,6 +76,15 @@
         .progress {
             display: none;
             margin: 20px 0;
+        }
+
+        .progress-text {
+            text-align: center;
+            margin-bottom: 10px;
+            color: #666;
+        }
+
+        .progress-bar-container {
             height: 4px;
             background: #f0f0f0;
             border-radius: 2px;
@@ -98,6 +107,8 @@
             cursor: pointer;
             font-size: 16px;
             transition: background 0.3s ease;
+            width: 100%;
+            margin-top: 20px;
         }
 
         button:hover {
@@ -114,6 +125,17 @@
             padding: 8px;
             border-radius: 4px;
             border: 1px solid #ddd;
+            width: 100%;
+        }
+
+        .error-message {
+            color: #dc3545;
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 20px;
+            display: none;
         }
     </style>
 </head>
@@ -137,8 +159,13 @@
         <img id="preview">
         
         <div class="progress">
-            <div class="progress-bar"></div>
+            <div class="progress-text">正在处理中...</div>
+            <div class="progress-bar-container">
+                <div class="progress-bar"></div>
+            </div>
         </div>
+
+        <div class="error-message" id="errorMessage"></div>
 
         <button id="startButton" disabled>开始识别</button>
         
@@ -153,7 +180,9 @@
         const startButton = document.getElementById('startButton');
         const progress = document.querySelector('.progress');
         const progressBar = document.querySelector('.progress-bar');
+        const progressText = document.querySelector('.progress-text');
         const languageSelect = document.getElementById('language');
+        const errorMessage = document.getElementById('errorMessage');
 
         // 处理拖放
         dropZone.addEventListener('dragover', (e) => {
@@ -180,6 +209,21 @@
             handleFiles(e.target.files);
         });
 
+        function showError(message) {
+            errorMessage.textContent = message;
+            errorMessage.style.display = 'block';
+            setTimeout(() => {
+                errorMessage.style.display = 'none';
+            }, 5000);
+        }
+
+        function updateProgress(status, progress = 0) {
+            progressText.textContent = status;
+            if (progress > 0) {
+                progressBar.style.width = `${progress * 100}%`;
+            }
+        }
+
         function handleFiles(files) {
             if (files.length > 0) {
                 const file = files[0];
@@ -189,39 +233,66 @@
                         preview.src = e.target.result;
                         preview.style.display = 'block';
                         startButton.disabled = false;
+                        result.style.display = 'none';
+                        errorMessage.style.display = 'none';
                     };
                     reader.readAsDataURL(file);
                 } else {
-                    alert('请上传图片文件！');
+                    showError('请上传图片文件！');
                 }
             }
         }
 
         startButton.addEventListener('click', async () => {
-            startButton.disabled = true;
-            result.style.display = 'none';
-            progress.style.display = 'block';
-            
             try {
+                startButton.disabled = true;
+                result.style.display = 'none';
+                progress.style.display = 'block';
+                errorMessage.style.display = 'none';
+                progressBar.style.width = '0';
+
+                updateProgress('正在加载识别引擎...');
+                
                 const worker = await Tesseract.createWorker({
                     logger: message => {
-                        if (message.status === 'recognizing text') {
-                            progressBar.style.width = `${message.progress * 100}%`;
+                        console.log(message);
+                        switch (message.status) {
+                            case 'loading tesseract core':
+                                updateProgress('加载核心引擎中...');
+                                break;
+                            case 'loading language traineddata':
+                                updateProgress('加载语言包中...');
+                                break;
+                            case 'initializing api':
+                                updateProgress('初始化中...');
+                                break;
+                            case 'recognizing text':
+                                updateProgress('正在识别文字...', message.progress);
+                                break;
                         }
                     }
                 });
 
+                updateProgress('加载语言包中...');
                 await worker.loadLanguage(languageSelect.value);
+                
+                updateProgress('初始化中...');
                 await worker.initialize(languageSelect.value);
                 
+                updateProgress('开始识别...');
                 const { data: { text } } = await worker.recognize(preview);
                 
-                result.textContent = text;
-                result.style.display = 'block';
+                if (text.trim()) {
+                    result.textContent = text;
+                    result.style.display = 'block';
+                } else {
+                    showError('未能识别出文字，请尝试调整图片或更换图片。');
+                }
                 
                 await worker.terminate();
             } catch (error) {
-                alert('识别失败：' + error.message);
+                console.error(error);
+                showError('识别失败：' + (error.message || '未知错误'));
             } finally {
                 startButton.disabled = false;
                 progress.style.display = 'none';
